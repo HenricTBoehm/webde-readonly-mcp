@@ -11,6 +11,21 @@ Windows Credential Manager. Es wurden keine E-Mail-Adresse, UIDs, Absender, Betr
 Nachrichteninhalte, Dateinamen, Anhänge oder Hashwerte protokolliert oder im Repository
 gespeichert.
 
+## Aussagekraft und Grenzen
+
+Dieser Bericht ist ein anonymisierter, vom Projektbetreiber erstellter Funktionsnachweis. Der
+Test wurde nicht von einer unabhängigen Stelle reproduziert und ist weder ein Audit noch ein
+Nachweis gegenüber Dritten. GitHub Actions prüft die Anwendung mit simulierten
+IMAP-Antworten; der Zugriff auf das echte WEB.DE-Postfach ist bewusst nicht Teil der CI.
+
+Die geprüfte MCP-Verbindung gilt für einen lokalen Codex-Client auf demselben Rechner. Sie
+stellt keine automatische Verbindung zu einer bestehenden ChatGPT-Web-Unterhaltung her.
+
+Die Nur-Lese-Grenze wird durch die Anwendung (`EXAMINE`, zugelassene Kommandos und
+`BODY.PEEK`) erzwungen. Das verwendete WEB.DE-App-Passwort ist kein auf Nur-Lese-Zugriff
+beschränkter Berechtigungsnachweis und muss weiterhin wie ein vollwertiges Geheimnis
+geschützt werden.
+
 ## Ergebnis
 
 | Abnahmekriterium | Ergebnis |

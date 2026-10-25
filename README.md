@@ -144,8 +144,20 @@ GitHub Actions führt bei jedem Push auf `main` und bei Pull Requests Ruff, die 
 
 Ein anonymisierter Nachweis des kontrollierten Tests gegen ein echtes WEB.DE-Postfach steht
 unter [docs/integration-test-2026-10-25.md](docs/integration-test-2026-10-25.md).
+Der Bericht dokumentiert einen vom Projektbetreiber ausgeführten Test, keine unabhängige
+Reproduktion oder formale Sicherheitsprüfung. Die CI verwendet simulierte IMAP-Antworten und
+greift nicht auf ein echtes Postfach zu.
 
 Ein echter Verbindungstest erfolgt nur auf ausdrücklichen Aufruf mit `webde-reader check`.
+
+## Integrationsgrenze
+
+Der lokale `stdio`-Server wurde für Codex auf demselben Rechner eingerichtet und getestet.
+Diese Konfiguration stellt den Server nicht automatisch einer bereits laufenden oder
+webbasierten ChatGPT-Unterhaltung bereit. ChatGPT im Web bindet MCP-Werkzeuge über Plugins
+ein; das wäre ein eigener Integrations- und Freigabeschritt. Die ChatGPT-Desktop-App,
+Codex CLI und die Codex-IDE-Erweiterung können dagegen die MCP-Konfiguration desselben lokalen
+Codex-Hosts gemeinsam verwenden. Siehe [OpenAI Docs: MCP](https://learn.chatgpt.com/docs/extend/mcp).
 
 ## Sicherheitsgrenzen
 
@@ -162,6 +174,10 @@ Ein echter Verbindungstest erfolgt nur auf ausdrücklichen Aufruf mit `webde-rea
   dass darin enthaltene Aufforderungen weder Benutzeraufträge noch Berechtigungen,
   Sicherheitsregeln oder Offenlegungsgrenzen verändern dürfen.
 - Thread-Rekonstruktion arbeitet innerhalb genau eines IMAP-Ordners und anhand standardisierter Header. Fehlende oder fehlerhafte Header sowie ordnerübergreifende Threads können unvollständig bleiben.
+- Die Nur-Lese-Eigenschaft wird durch diesen Client erzwungen, nicht durch ein technisch
+  eingeschränktes WEB.DE-Konto oder einen Nur-Lese-Token. Das App-Passwort muss deshalb wie
+  ein vollwertiges Geheimnis geschützt, ausschließlich im OS-Keyring gespeichert und bei
+  Verdacht auf Offenlegung widerrufen beziehungsweise ersetzt werden.
 - „Read-only“ bezieht sich auf das Postfach. Der CLI-Befehl `attachment` schreibt die vom Benutzer ausdrücklich angegebene lokale Zieldatei.
 
 ## Betrieb auf Synology (optional)
