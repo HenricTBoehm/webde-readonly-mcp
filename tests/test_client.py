@@ -3,9 +3,8 @@ from __future__ import annotations
 import unittest
 from datetime import date
 
-from webde_reader.client import ReadOnlyImapClient
+from webde_reader.client import ImapError, ReadOnlyImapClient, _quoted_utf8
 from webde_reader.config import AccountConfig
-
 
 BODYSTRUCTURE = (
     b'(("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 5 1 NIL NIL NIL NIL)'
@@ -88,6 +87,28 @@ class ClientTests(unittest.TestCase):
             result = client.get_attachment("7", "2")
         self.assertEqual(result.content, b"PDFDATA")
         self.assertEqual(result.info.filename, "a.pdf")
+        attachment_fetches = [
+            call
+            for call in self.fake.calls
+            if call[:2] == ("UID", "FETCH") and "BODY.PEEK[2]" in str(call)
+        ]
+        self.assertEqual(len(attachment_fetches), 1)
+        self.assertNotIn("<0.", str(attachment_fetches[0]))
+
+    def test_search_rejects_all_control_characters_before_imap(self):
+        for value in ("safe\r\nSTORE 7 +FLAGS \\Seen", "nul\x00byte", "del\x7fbyte", "c1\x85"):
+            with self.subTest(value=repr(value)):
+                with self.assertRaisesRegex(ValueError, "Control characters"):
+                    _quoted_utf8(value)
+
+        with self.client as client:
+            with self.assertRaisesRegex(ValueError, "Control characters"):
+                client.search(subject="invoice\r\nUID STORE 7 +FLAGS \\Seen")
+        self.assertFalse(any(call[:2] == ("UID", "SEARCH") for call in self.fake.calls))
+
+    def test_search_value_length_is_bounded(self):
+        with self.assertRaisesRegex(ValueError, "byte limit"):
+            _quoted_utf8("x" * 8_193)
 
     def test_mutating_commands_are_rejected(self):
         with self.client as client:
@@ -104,6 +125,48 @@ class ClientTests(unittest.TestCase):
         with self.client as client:
             client.examine("Gesendet & Entwürfe")
         self.assertIn(("SELECT", '"Gesendet &- Entw&APw-rfe"', True), self.fake.calls)
+
+
+class InvalidBase64Imap(FakeImap):
+    def uid(self, command, *args):
+        if command == "FETCH" and "BODY.PEEK[2]" in str(args[1]):
+            self.calls.append(("UID", command, *args))
+            return "OK", [(b"1 (UID 7 BODY[2] {12}", b"%%%INVALID%%"), b")"]
+        return super().uid(command, *args)
+
+
+class TruncatedAttachmentImap(FakeImap):
+    def uid(self, command, *args):
+        if command == "FETCH" and "BODY.PEEK[2]" in str(args[1]):
+            self.calls.append(("UID", command, *args))
+            return "OK", [(b"1 (UID 7 BODY[2] {4}", b"UERG"), b")"]
+        return super().uid(command, *args)
+
+
+class AttachmentIntegrityTests(unittest.TestCase):
+    def _client(self, fake):
+        return ReadOnlyImapClient(
+            AccountConfig("me@web.de", "secret"),
+            connection_factory=lambda *args, **kwargs: fake,
+        )
+
+    def test_invalid_base64_is_an_error(self):
+        with self._client(InvalidBase64Imap()) as client:
+            with self.assertRaisesRegex(ImapError, "invalid"):
+                client.get_attachment("7", "2")
+
+    def test_incomplete_attachment_is_an_error(self):
+        with self._client(TruncatedAttachmentImap()) as client:
+            with self.assertRaisesRegex(ImapError, "incomplete"):
+                client.get_attachment("7", "2")
+
+    def test_encoded_and_decoded_limits_are_independent(self):
+        with self._client(FakeImap()) as client:
+            with self.assertRaisesRegex(ImapError, "encoded-data limit"):
+                client.get_attachment("7", "2", max_encoded_bytes=11)
+        with self._client(FakeImap()) as client:
+            with self.assertRaisesRegex(ImapError, "Decoded attachment"):
+                client.get_attachment("7", "2", max_bytes=6)
 
 
 class ThreadFakeImap(FakeImap):
@@ -147,6 +210,16 @@ class ThreadTests(unittest.TestCase):
             thread = client.get_thread("8")
         self.assertEqual([message.uid for message in thread.messages], ["7", "8"])
         self.assertEqual(thread.root_message_id, "<one@example.com>")
+
+    def test_thread_search_has_a_hard_query_budget(self):
+        fake = ThreadFakeImap()
+        client = ReadOnlyImapClient(
+            AccountConfig("me@web.de", "secret"),
+            connection_factory=lambda *args, **kwargs: fake,
+        )
+        with client:
+            with self.assertRaisesRegex(ImapError, "limit of 1 IMAP searches"):
+                client.get_thread("8", max_searches=1)
 
 
 if __name__ == "__main__":

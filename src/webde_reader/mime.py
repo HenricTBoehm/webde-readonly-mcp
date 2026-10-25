@@ -77,15 +77,26 @@ def parse_header_summary(
     )
 
 
-def decode_transfer(data: bytes, encoding: str | None) -> bytes:
+def decode_transfer(data: bytes, encoding: str | None, *, strict: bool = False) -> bytes:
     normalized = (encoding or "").upper()
     if normalized == "BASE64":
         try:
-            return base64.b64decode(data, validate=False)
-        except (binascii.Error, ValueError):
+            compact = bytes(value for value in data if value not in b" \t\r\n")
+            return base64.b64decode(compact, validate=strict)
+        except (binascii.Error, ValueError) as exc:
+            if strict:
+                raise ValueError("Invalid base64 transfer encoding") from exc
             return data
     if normalized == "QUOTED-PRINTABLE":
+        if strict:
+            without_soft_breaks = data.replace(b"=\r\n", b"").replace(b"=\n", b"")
+            for match in re.finditer(b"=", without_soft_breaks):
+                escape = without_soft_breaks[match.start() + 1 : match.start() + 3]
+                if len(escape) != 2 or not re.fullmatch(b"[0-9A-Fa-f]{2}", escape):
+                    raise ValueError("Invalid quoted-printable transfer encoding")
         return quopri.decodestring(data)
+    if strict and normalized not in {"", "7BIT", "8BIT", "BINARY"}:
+        raise ValueError(f"Unsupported content-transfer-encoding: {encoding}")
     return data
 
 
@@ -128,7 +139,7 @@ class BodyPart:
     size: int = 0
     disposition: str | None = None
     disposition_params: dict[str, str] = field(default_factory=dict)
-    children: list["BodyPart"] = field(default_factory=list)
+    children: list[BodyPart] = field(default_factory=list)
 
     @property
     def filename(self) -> str | None:

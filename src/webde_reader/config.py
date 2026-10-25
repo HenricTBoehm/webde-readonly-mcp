@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-
 HOST = "imap.web.de"
 PORT = 993
 KEYRING_SERVICE = "webde-reader-imap"
@@ -70,7 +69,7 @@ class AccountConfig:
             raise ConfigurationError("The WEB.DE app password must not be empty.")
 
     @classmethod
-    def from_environment(cls) -> "AccountConfig":
+    def from_environment(cls) -> AccountConfig:
         username = os.environ.get("WEBDE_IMAP_USER", "").strip()
         if not username:
             raise ConfigurationError("Set WEBDE_IMAP_USER to your complete WEB.DE address.")

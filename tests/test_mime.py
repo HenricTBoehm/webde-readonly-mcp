@@ -3,8 +3,12 @@ from __future__ import annotations
 import base64
 import unittest
 
-from webde_reader.mime import decode_text, parse_bodystructure, parse_header_summary
-
+from webde_reader.mime import (
+    decode_text,
+    decode_transfer,
+    parse_bodystructure,
+    parse_header_summary,
+)
 
 BODYSTRUCTURE = (
     b'(("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "QUOTED-PRINTABLE" 12 1 NIL NIL NIL NIL)'
@@ -39,8 +43,36 @@ class MimeTests(unittest.TestCase):
         self.assertEqual(result.references, ["<root@example.com>", "<middle@example.com>"])
 
     def test_transfer_and_charset_decoding(self):
-        encoded = base64.b64encode("Grüße".encode("utf-8"))
+        encoded = base64.b64encode("Grüße".encode())
         self.assertEqual(decode_text(encoded, encoding="BASE64", charset="utf-8"), "Grüße")
+
+    def test_strict_transfer_decoding_rejects_malformed_data(self):
+        with self.assertRaisesRegex(ValueError, "base64"):
+            decode_transfer(b"%%%INVALID%%", "BASE64", strict=True)
+        with self.assertRaisesRegex(ValueError, "quoted-printable"):
+            decode_transfer(b"broken=QZ", "QUOTED-PRINTABLE", strict=True)
+        with self.assertRaisesRegex(ValueError, "Unsupported"):
+            decode_transfer(b"data", "X-UNKNOWN", strict=True)
+
+    def test_rfc2231_filename_is_decoded(self):
+        structure = (
+            b'("APPLICATION" "PDF" NIL NIL NIL "BASE64" 4 NIL '
+            b'("ATTACHMENT" ("FILENAME*" "UTF-8\'\'Pr%C3%BCfung.pdf")) NIL NIL)'
+        )
+        part = parse_bodystructure(structure)
+        self.assertEqual(part.filename, "Prüfung.pdf")
+
+    def test_attached_message_rfc822_is_handled_as_one_attachment(self):
+        structure = (
+            b'("MESSAGE" "RFC822" ("NAME" "forwarded.eml") NIL NIL "7BIT" 120 '
+            b'NIL ("DATE" "SUBJECT" NIL NIL NIL NIL NIL NIL NIL NIL) '
+            b'("TEXT" "PLAIN" NIL NIL NIL "7BIT" 4 1) 5 NIL '
+            b'("ATTACHMENT" ("FILENAME" "forwarded.eml")) NIL NIL)'
+        )
+        part = parse_bodystructure(structure)
+        self.assertEqual(part.content_type, "message/rfc822")
+        self.assertEqual(part.filename, "forwarded.eml")
+        self.assertTrue(part.is_attachment)
 
 
 if __name__ == "__main__":

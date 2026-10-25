@@ -4,14 +4,14 @@ import base64
 import imaplib
 import re
 import ssl
+import unicodedata
+from collections.abc import Iterable
 from contextlib import AbstractContextManager
 from datetime import date
-from typing import Iterable
 
 from .config import AccountConfig
 from .mime import BodyPart, decode_text, decode_transfer, parse_bodystructure, parse_header_summary
 from .models import AttachmentData, MessageDetail, MessageSummary, Thread
-
 
 HEADER_FIELDS = "DATE FROM TO CC SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES"
 FETCH_SUMMARY = (
@@ -23,9 +23,14 @@ class ImapError(RuntimeError):
     """A safe, user-facing IMAP failure."""
 
 
-def _quoted_utf8(value: str) -> bytes:
+def _quoted_utf8(value: str, *, max_bytes: int = 8_192) -> bytes:
+    if any(unicodedata.category(character) in {"Cc", "Cs"} for character in value):
+        raise ValueError("Control characters are forbidden in IMAP search values")
+    encoded = value.encode("utf-8")
+    if len(encoded) > max_bytes:
+        raise ValueError(f"IMAP search value exceeds the {max_bytes}-byte limit")
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'.encode("utf-8")
+    return f'"{escaped}"'.encode()
 
 
 def _modified_utf7_mailbox(value: str) -> str:
@@ -134,7 +139,7 @@ class ReadOnlyImapClient(AbstractContextManager["ReadOnlyImapClient"]):
         self._imap = None
         self._mailbox: str | None = None
 
-    def __enter__(self) -> "ReadOnlyImapClient":
+    def __enter__(self) -> ReadOnlyImapClient:
         context = ssl.create_default_context()
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         try:
@@ -288,7 +293,12 @@ class ReadOnlyImapClient(AbstractContextManager["ReadOnlyImapClient"]):
         *,
         mailbox: str = "INBOX",
         max_bytes: int = 25_000_000,
+        max_encoded_bytes: int = 40_000_000,
     ) -> AttachmentData:
+        if max_bytes < 1 or max_bytes > 100_000_000:
+            raise ValueError("max_bytes must be between 1 and 100,000,000")
+        if max_encoded_bytes < 1 or max_encoded_bytes > 150_000_000:
+            raise ValueError("max_encoded_bytes must be between 1 and 150,000,000")
         self._validate_uid(uid)
         if not re.fullmatch(r"\d+(?:\.\d+)*", part_number):
             raise ValueError("part_number must look like '2' or '1.2'")
@@ -298,12 +308,23 @@ class ReadOnlyImapClient(AbstractContextManager["ReadOnlyImapClient"]):
         part = next((item for item in structure.walk() if item.section == part_number), None)
         if part is None or not part.is_attachment:
             raise ImapError(f"Part {part_number!r} is not an attachment in message UID {uid}.")
-        if part.size > max_bytes:
+        if part.size <= 0:
+            raise ImapError("Attachment has no trustworthy encoded size; refusing to fetch it.")
+        if part.size > max_encoded_bytes:
             raise ImapError(
-                f"Attachment is {part.size} bytes, above the configured {max_bytes}-byte limit."
+                f"Encoded attachment is {part.size} bytes, above the configured "
+                f"{max_encoded_bytes}-byte encoded-data limit."
             )
-        payload = self._fetch_part(uid, part.section, partial=max_bytes)
-        content = decode_transfer(payload, part.encoding)
+        payload = self._fetch_part(uid, part.section)
+        if len(payload) != part.size:
+            raise ImapError(
+                "Attachment transfer was incomplete: "
+                f"expected {part.size} encoded bytes, received {len(payload)}."
+            )
+        try:
+            content = decode_transfer(payload, part.encoding, strict=True)
+        except ValueError as exc:
+            raise ImapError(f"Attachment transfer encoding is invalid: {exc}") from exc
         if len(content) > max_bytes:
             raise ImapError("Decoded attachment exceeds the configured size limit.")
         return AttachmentData(info=part.to_attachment(), content=content)
@@ -314,9 +335,15 @@ class ReadOnlyImapClient(AbstractContextManager["ReadOnlyImapClient"]):
         *,
         mailbox: str = "INBOX",
         max_messages: int = 100,
+        max_searches: int = 300,
+        max_reference_ids: int = 500,
     ) -> Thread:
         if max_messages < 1 or max_messages > 500:
             raise ValueError("max_messages must be between 1 and 500")
+        if max_searches < 1 or max_searches > 1_500:
+            raise ValueError("max_searches must be between 1 and 1,500")
+        if max_reference_ids < 1 or max_reference_ids > 2_000:
+            raise ValueError("max_reference_ids must be between 1 and 2,000")
         seed = self.get_summary(uid, mailbox=mailbox)
         found: dict[str, MessageSummary] = {seed.uid: seed}
         pending_ids = set(seed.references)
@@ -324,7 +351,10 @@ class ReadOnlyImapClient(AbstractContextManager["ReadOnlyImapClient"]):
             pending_ids.add(seed.message_id)
         if seed.in_reply_to:
             pending_ids.add(seed.in_reply_to)
+        if len(pending_ids) > max_reference_ids:
+            raise ImapError("Thread contains more reference IDs than the configured limit.")
         searched_ids: set[str] = set()
+        search_count = 0
         while pending_ids and len(found) < max_messages:
             message_id = pending_ids.pop()
             if message_id in searched_ids:
@@ -332,6 +362,11 @@ class ReadOnlyImapClient(AbstractContextManager["ReadOnlyImapClient"]):
             searched_ids.add(message_id)
             candidate_uids: set[str] = set()
             for field in ("MESSAGE-ID", "IN-REPLY-TO", "REFERENCES"):
+                if search_count >= max_searches:
+                    raise ImapError(
+                        f"Thread search exceeded the configured limit of {max_searches} IMAP searches."
+                    )
+                search_count += 1
                 candidate_uids.update(
                     self._search_tokens(
                         ["HEADER", field, _quoted_utf8(message_id)],
@@ -348,6 +383,8 @@ class ReadOnlyImapClient(AbstractContextManager["ReadOnlyImapClient"]):
                     pending_ids.add(message.message_id)
                 if message.in_reply_to:
                     pending_ids.add(message.in_reply_to)
+                if len(pending_ids | searched_ids) > max_reference_ids:
+                    raise ImapError("Thread contains more reference IDs than the configured limit.")
         messages = sorted(
             found.values(),
             key=lambda item: (item.date is None, item.date.isoformat() if item.date else "", int(item.uid)),

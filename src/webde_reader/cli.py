@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
-import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -57,6 +56,8 @@ def build_parser() -> argparse.ArgumentParser:
     thread.add_argument("uid")
     thread.add_argument("--mailbox", default="INBOX")
     thread.add_argument("--max-messages", type=int, default=100)
+    thread.add_argument("--max-searches", type=int, default=300)
+    thread.add_argument("--max-reference-ids", type=int, default=500)
 
     attachment = sub.add_parser("attachment", help="Download one selected MIME attachment")
     attachment.add_argument("uid")
@@ -64,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     attachment.add_argument("--mailbox", default="INBOX")
     attachment.add_argument("--output", type=Path, required=True)
     attachment.add_argument("--max-bytes", type=int, default=25_000_000)
+    attachment.add_argument("--max-encoded-bytes", type=int, default=40_000_000)
     attachment.add_argument("--force", action="store_true")
     return parser
 
@@ -118,6 +120,8 @@ def run(args: argparse.Namespace) -> int:
                     args.uid,
                     mailbox=args.mailbox,
                     max_messages=args.max_messages,
+                    max_searches=args.max_searches,
+                    max_reference_ids=args.max_reference_ids,
                 ).to_dict()
             )
         elif args.command == "attachment":
@@ -130,6 +134,7 @@ def run(args: argparse.Namespace) -> int:
                 args.part,
                 mailbox=args.mailbox,
                 max_bytes=args.max_bytes,
+                max_encoded_bytes=args.max_encoded_bytes,
             )
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_bytes(result.content)

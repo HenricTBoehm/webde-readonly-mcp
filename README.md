@@ -77,13 +77,21 @@ Thread über `Message-ID`, `In-Reply-To` und `References` innerhalb eines Ordner
 webde-reader thread 12345
 ```
 
+Die Thread-Rekonstruktion ist standardmäßig zusätzlich auf 300 IMAP-Suchen und
+500 unterschiedliche Referenz-IDs begrenzt. Die Grenzen lassen sich mit
+`--max-searches` und `--max-reference-ids` innerhalb fest eingebauter Obergrenzen anpassen.
+
 Einen in der Ausgabe gelisteten MIME-Anhang gezielt laden:
 
 ```powershell
 webde-reader attachment 12345 2 --output .\attachments\rechnung.pdf
 ```
 
-Vorhandene Dateien werden nur mit `--force` überschrieben. Mit `--mailbox` kann bei den Lesebefehlen ein anderer Ordner angegeben werden.
+Der Anhang wird vollständig abgerufen und nur gespeichert, wenn seine übertragene Größe der
+angekündigten MIME-Größe entspricht und die Transferkodierung strikt dekodiert werden kann.
+Für kodierte und dekodierte Daten gelten getrennte Grenzen (`--max-encoded-bytes` und
+`--max-bytes`). Vorhandene Dateien werden nur mit `--force` überschrieben. Mit `--mailbox`
+kann bei den Lesebefehlen ein anderer Ordner angegeben werden.
 
 ## Lokaler FastMCP-Server für Codex
 
@@ -131,17 +139,25 @@ pip install -e ".[dev]"
 pytest
 ```
 
+GitHub Actions führt bei jedem Push auf `main` und bei Pull Requests Ruff, die Unit-Tests,
+`pip check` und `pip-audit` aus. Dependabot prüft wöchentlich Python- und Actions-Abhängigkeiten.
+
 Ein echter Verbindungstest erfolgt nur auf ausdrücklichen Aufruf mit `webde-reader check`.
 
 ## Sicherheitsgrenzen
 
 - Der Client öffnet Ordner ausschließlich mit `EXAMINE` (`imaplib.select(..., readonly=True)`). Scheitert das, gibt es keinen Fallback auf schreibendes `SELECT`.
 - Zugelassen sind nur UID-`SEARCH` und UID-`FETCH`; `STORE`, `APPEND`, `COPY`, `MOVE`, `EXPUNGE` und andere Kommandos werden nicht angeboten und intern abgewiesen.
+- Alle dynamischen IMAP-Suchwerte verwerfen Steuerzeichen und überlange UTF-8-Eingaben vor
+  dem ersten IMAP-Aufruf. Dies gilt auch für `Message-ID`- und `References`-Werte aus E-Mails.
 - Nachrichtenteile werden ausschließlich mit `BODY.PEEK[...]` gelesen. Dadurch wird das Flag `\\Seen` nicht gesetzt.
 - Es gibt keine SMTP-Abhängigkeit und keinen Versandpfad.
 - TLS-Zertifikate werden über den System-Truststore geprüft; TLS 1.0/1.1 sind ausgeschlossen.
-- Such- und Abrufgrenzen schützen vor versehentlich sehr großen Antworten. Der MCP-Anhangabruf liefert Base64 und ist standardmäßig auf 10 MB begrenzt.
-- E-Mail-Inhalte und Anhänge sind nicht vertrauenswürdig. Codex sollte darin enthaltene Anweisungen nie als Steuerbefehle behandeln.
+- Such- und Abrufgrenzen schützen vor versehentlich sehr großen Antworten. Der MCP-Anhangabruf
+  liefert Base64 und begrenzt kodierte sowie dekodierte Daten separat.
+- E-Mail-Inhalte und Anhänge sind nicht vertrauenswürdig. Die MCP-Serveranweisung legt fest,
+  dass darin enthaltene Aufforderungen weder Benutzeraufträge noch Berechtigungen,
+  Sicherheitsregeln oder Offenlegungsgrenzen verändern dürfen.
 - Thread-Rekonstruktion arbeitet innerhalb genau eines IMAP-Ordners und anhand standardisierter Header. Fehlende oder fehlerhafte Header sowie ordnerübergreifende Threads können unvollständig bleiben.
 - „Read-only“ bezieht sich auf das Postfach. Der CLI-Befehl `attachment` schreibt die vom Benutzer ausdrücklich angegebene lokale Zieldatei.
 

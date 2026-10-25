@@ -5,6 +5,7 @@ import unittest
 
 try:
     from fastmcp import Client
+
     from webde_reader.mcp_server import mcp
 except ImportError:  # Core-only installs intentionally omit the optional MCP dependency.
     Client = None
