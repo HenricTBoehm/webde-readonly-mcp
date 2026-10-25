@@ -142,6 +142,9 @@ pytest
 GitHub Actions führt bei jedem Push auf `main` und bei Pull Requests Ruff, die Unit-Tests,
 `pip check` und `pip-audit` aus. Dependabot prüft wöchentlich Python- und Actions-Abhängigkeiten.
 
+Ein anonymisierter Nachweis des kontrollierten Tests gegen ein echtes WEB.DE-Postfach steht
+unter [docs/integration-test-2026-10-25.md](docs/integration-test-2026-10-25.md).
+
 Ein echter Verbindungstest erfolgt nur auf ausdrücklichen Aufruf mit `webde-reader check`.
 
 ## Sicherheitsgrenzen
