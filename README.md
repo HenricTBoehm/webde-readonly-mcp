@@ -99,6 +99,7 @@ Der Server verwendet `stdio`: Codex startet einen lokalen Unterprozess; es wird 
 
 ```powershell
 codex mcp add webde-mail --env WEBDE_IMAP_USER=name@web.de -- "C:\ABSOLUTER\PFAD\.venv\Scripts\python.exe" -m webde_reader.mcp_server
+codex mcp get webde-mail --json
 codex mcp list
 ```
 
@@ -109,11 +110,19 @@ Falls der Codex-Prozess den Benutzervariablen nicht folgt, kann der Server in `~
 command = "C:\\ABSOLUTER\\PFAD\\.venv\\Scripts\\python.exe"
 args = ["-m", "webde_reader.mcp_server"]
 env = { WEBDE_IMAP_USER = "name@web.de" }
+startup_timeout_sec = 30
+required = true
 enabled_tools = ["search_messages", "get_message", "reconstruct_thread", "get_attachment"]
 default_tools_approval_mode = "writes"
 ```
 
 Unter Linux lautet `command` entsprechend `/absoluter/pfad/.venv/bin/python`. Das App-Passwort bleibt im OS-Keyring und gehört nicht in `config.toml`. Starte nach einer Konfigurationsänderung eine neue lokale Codex-Sitzung, falls der laufende Client seine MCP-Konfiguration nicht neu lädt.
+
+Die 30 Sekunden Startzeit und `required = true` entsprechen der erfolgreich getesteten
+Windows-Konfiguration. Dadurch wartet Codex auf die Initialisierung des Servers und meldet
+einen Startfehler, statt die Werkzeuge unbemerkt auszulassen. `enabled_tools` begrenzt den
+sichtbaren Werkzeugsatz; `default_tools_approval_mode = "writes"` fordert bei Werkzeugen ohne
+Nur-Lese-Kennzeichnung eine Freigabe an.
 
 Der Server stellt nur vier Werkzeuge bereit:
 
